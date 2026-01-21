@@ -58,8 +58,21 @@ def compute_objectives_from_time_series(time_series: List[Dict[str, Any]]) -> Di
     NOTE: If you want, you can add more objectives (lane-specific distances, time-to-crash, etc.)
     but keep the keys above at least.
     """
-    # TODO (students)
-    raise NotImplementedError
+    crash_count = 1 if any(frame.get("crashed", False) for frame in time_series) else 0
+    min_distance = float('inf')
+
+    for frame in time_series:
+        ego = frame.get('ego', None)
+        others = frame.get('others', [])
+        if ego is not None and others:
+            ego_pos = np.array(ego['pos'])
+            for car in others:
+                car_pos = np.array(car['pos'])
+                distance = np.linalg.norm(ego_pos - car_pos)
+                if distance < min_distance:
+                    min_distance = distance
+
+    return {"crash_count": crash_count, "min_distance": min_distance}
 
 
 def compute_fitness(objectives: Dict[str, Any]) -> float:
@@ -75,8 +88,8 @@ def compute_fitness(objectives: Dict[str, Any]) -> float:
 
     You can design a more refined scalarization if desired.
     """
-    # TODO (students)
-    raise NotImplementedError
+    fitness = -1.0 if objectives.get('crash_count', 0) > 0 else objectives.get('min_distance', float('inf'))
+    return fitness
 
 
 # ============================================================
@@ -107,7 +120,23 @@ def mutate_config(
       - adaptive step sizes, etc.
     """
     # TODO (students)
-    raise NotImplementedError
+    cfg_copy = copy.deepcopy(cfg)
+    param_to_mutate = rng.choice(list(param_spec.keys()))
+    param_info = param_spec[param_to_mutate]
+    param_type = param_info['type']
+
+    if param_type == 'int':
+        new_value = rng.integers(param_info['min'], param_info['max'] + 1)
+    elif param_type =='float':
+        new_value = rng.uniform(param_info['min'], param_info['max'])
+    
+    cfg_copy[param_to_mutate] = new_value
+
+    if param_to_mutate == 'lanes_count' and 'initial_lane_id' in cfg_copy:
+        lanes_count = cfg_copy['lanes_count']
+        cfg_copy['initial_lane_id'] = int(np.clip(cfg_copy['initial_lane_id'], 0, lanes_count - 1))
+    
+    return cfg_copy
 
 
 # ============================================================
@@ -178,4 +207,46 @@ def hill_climb(
     # - accept if improved
     # - early stop on crash (optional)
 
-    raise NotImplementedError
+    for i in range(iterations):
+        for j in range(neighbors_per_iter):
+            neighbor_cfg = mutate_config(current_cfg, param_spec, rng)
+            seed_base = int(rng.integers(1e9))
+            crashed, ts = run_episode(env_id, neighbor_cfg, policy, defaults, seed_base)
+            obj = compute_objectives_from_time_series(ts)
+            fit = compute_fitness(obj)
+
+            if crashed:
+                best_cfg = copy.deepcopy(neighbor_cfg)
+                best_obj = dict(obj)
+                best_fit = float(fit)
+                best_seed_base = seed_base
+                history.append(best_fit)
+                stats = {
+                      "best_cfg": best_cfg,
+                      "best_objectives": best_obj,
+                      "best_fitness": best_fit,
+                      "best_seed_base": best_seed_base,
+                      "history": history
+                }
+                return stats
+
+            if fit < cur_fit:
+                current_cfg = neighbor_cfg
+                cur_fit = fit
+
+                if fit < best_fit:
+                    best_cfg = copy.deepcopy(neighbor_cfg)
+                    best_obj = dict(obj)
+                    best_fit = float(fit)
+                    best_seed_base = seed_base
+                    history.append(best_fit)
+
+
+    stats = {
+          "best_cfg": best_cfg,
+          "best_objectives": best_obj,
+          "best_fitness": best_fit,
+          "best_seed_base": best_seed_base,
+          "history": history
+    }
+    return stats

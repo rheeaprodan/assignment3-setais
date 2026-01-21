@@ -1,7 +1,7 @@
 gymnasium==1.0.0
 highway_env==1.10.1
 numpy==1.26.4
-matplotlib==3.10.6
+matplotlib==3.9.4
 torch>=2.2.2
 stable_baselines3==2.4.1
 tqdm==4.67.1
