@@ -2,17 +2,14 @@ from config.search_space import param_spec, base_cfg
 from policies.pretrained_policy import load_pretrained_policy
 from envs.highway_env_utils import make_env
 from search.random_search import RandomSearch
-from search.hill_climbing import HillClimbingSearch
 
 def main():
     env_id = "highway-fast-v0"
     policy = load_pretrained_policy("agents/model")
     env, defaults = make_env(env_id)
 
-    # search = RandomSearch(env_id, base_cfg, param_spec, policy, defaults)
-    search = HillClimbingSearch(env_id, base_cfg, param_spec, policy, defaults)
-    # Increased iterations and neighbors for better crash detection
-    crashes = search.run_search(n_scenarios=50, seed=11, iterations=200, neighbors_per_iter=15)
+    search = RandomSearch(env_id, base_cfg, param_spec, policy, defaults)
+    crashes = search.run_search(n_scenarios=50, seed=11)
 
     print(f"✅ Found {len(crashes)} crashes.")
     #if crashes:
