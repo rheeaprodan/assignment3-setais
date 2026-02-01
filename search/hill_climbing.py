@@ -59,6 +59,14 @@ class HillClimbingSearch:
         )
 
         all_crashes = res.get("all_crashes", [])
+        best_dist = res["best_objectives"].get("min_distance", float("inf"))
+        
+        print("\n" + "="*40)
+        print(f"RESULTS: Hill Climbing")
+        print(f"Total Crashes Found: {len(all_crashes)}")
+        print(f"Best Fitness: {res['best_fitness']:.4f}")
+        print(f"Lowest Minimum Distance: {best_dist:.2f} m")
+        print("="*40 + "\n")
         
         processed_seeds = set()
         final_crash_log = []
@@ -81,7 +89,7 @@ class HillClimbingSearch:
                 self.policy, 
                 self.defaults, 
                 s, 
-                out_dir="videos42"
+                out_dir="videos"
             )
 
         if not final_crash_log:
@@ -132,6 +140,9 @@ def compute_objectives_from_time_series(time_series: List[Dict[str, Any]]) -> Di
                 if distance < min_distance:
                     min_distance = distance
 
+    if min_distance == float('inf'):
+        min_distance = 1000.0
+
     return {"crash_count": crash_count, "min_distance": min_distance}
 
 
@@ -148,8 +159,10 @@ def compute_fitness(objectives: Dict[str, Any]) -> float:
 
     You can design a more refined scalarization if desired.
     """
-    fitness = -1.0 if objectives.get('crash_count', 0) > 0 else objectives.get('min_distance', float('inf'))
-    return fitness
+    if objectives.get('crash_count', 0) > 0:
+        return -1.0
+    
+    return float(objectives.get('min_distance', 1000.0))
 
 
 # ============================================================
@@ -189,6 +202,8 @@ def mutate_config(
         new_value = rng.integers(param_info['min'], param_info['max'] + 1)
     elif param_type =='float':
         new_value = rng.uniform(param_info['min'], param_info['max'])
+    else:
+        new_value = cfg_copy[param_to_mutate]
     
     cfg_copy[param_to_mutate] = new_value
 
@@ -265,23 +280,20 @@ def hill_climb(
         "all_crashes": []
     }
     
-    # if cur_fit <= -1.0:
-    #     return best_res
+    if cur_fit <= -1.0:
+        print("Initial configuration resulted in a crash!")
+        best_res["all_crashes"].append({
+            "cfg": copy.deepcopy(current_cfg),
+            "seed": seed_base,
+            "fitness": cur_fit
+        })
 
     history = [cur_fit]
-    pbar = tqdm(range(iterations), desc="Hill Climbing")
-
-    # TODO (students): implement HC loop
-    # - generate neighbors
-    # - evaluate
-    # - pick best
-    # - accept if improved
-    # - early stop on crash (optional)
-
-    
+    pbar = tqdm(range(iterations), desc="Hill Climbing")    
 
     for _ in pbar:
         iteration_candidates = []
+        found_crash_in_batch = False
         for j in range(neighbors_per_iter):
             neighbor_cfg = mutate_config(current_cfg, param_spec, rng)
             seed_base = int(rng.integers(1e9))
@@ -299,20 +311,20 @@ def hill_climb(
             }
             iteration_candidates.append(candidate)
 
-            if crashed:
-                print("Crash detected in hill climb evaluation.")
-                crash_entry = {
+            if fit <= -1.0:
+                print(f"Crash found! Fitness: {fit}")
+                best_res["all_crashes"].append({
                     "cfg": copy.deepcopy(neighbor_cfg), 
                     "seed": seed_base,
                     "fitness": fit
-                }
-                best_res["all_crashes"].append(crash_entry)
-                best_cfg = copy.deepcopy(neighbor_cfg)
-                best_obj = dict(obj)
-                best_fit = float(fit)
-                best_seed_base = seed_base
-                history.append(best_fit)
-                break
+                })
+                # Update best result immediately
+                best_res["best_cfg"] = copy.deepcopy(neighbor_cfg)
+                best_res["best_objectives"] = obj
+                best_res["best_fitness"] = fit
+                best_res["best_seed_base"] = seed_base
+                best_res["history"].append(fit)
+            
             best_neighbor = min(iteration_candidates, key=lambda x: x["fit"])
 
             if best_neighbor['fit'] < cur_fit:
