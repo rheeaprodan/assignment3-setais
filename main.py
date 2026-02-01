@@ -31,7 +31,7 @@ def main():
     #    print(crashes)
 
 
-def analyze_results(method_name, crash_log, history=None):
+def analyze_results(method_name, crash_log):
     """
     Analyzes the crash log to extract scenario characteristics and patterns.
     """
@@ -39,38 +39,42 @@ def analyze_results(method_name, crash_log, history=None):
     
     if not crash_log:
         print("No crashes found to analyze.")
+        print("="*60)
         return
 
-    # 1. Extract parameters from all failing scenarios
-    vehicles_counts = [c['cfg']['vehicles_count'] for c in crash_log]
-    spacings = [c['cfg']['initial_spacing'] for c in crash_log]
-    lanes = [c['cfg']['initial_lane_id'] for c in crash_log]
-    durations = [c['cfg']['duration'] for c in crash_log]
+    # 1. Safely Extract parameters (use defaults if key is missing)
+    vehicles_counts = [c['cfg'].get('vehicles_count', 0) for c in crash_log]
+    spacings = [c['cfg'].get('initial_spacing', 0.0) for c in crash_log]
+    lanes = [c['cfg'].get('initial_lane_id', 'N/A') for c in crash_log]
+    durations = [c['cfg'].get('duration', 0) for c in crash_log]
 
     # 2. Statistics (Pattern Detection)
     print(f"Total Crashes: {len(crash_log)}")
     
     # Vehicles
-    avg_v = np.mean(vehicles_counts)
-    print(f"Avg Vehicle Count: {avg_v:.2f} (Range: {min(vehicles_counts)}-{max(vehicles_counts)})")
+    if vehicles_counts:
+        avg_v = np.mean(vehicles_counts)
+        print(f"Avg Vehicle Count: {avg_v:.2f} (Range: {min(vehicles_counts)}-{max(vehicles_counts)})")
     
     # Spacing
-    avg_s = np.mean(spacings)
-    print(f"Avg Initial Spacing: {avg_s:.2f} (Range: {min(spacings):.2f}-{max(spacings):.2f})")
+    if spacings:
+        avg_s = np.mean(spacings)
+        print(f"Avg Initial Spacing: {avg_s:.2f} (Range: {min(spacings):.2f}-{max(spacings):.2f})")
     
     # Lane Distribution
     lane_counts = Counter(lanes)
     print(f"Crashes by Initial Lane: {dict(lane_counts)}")
 
-    # 3. Most Critical Scenario (Best Fitness / Hardest Crash)
-    # For Random Search, we might not have fitness, so we just take the first or last.
-    # For Hill Climbing, the last one in the log is usually the most evolved.
+    # 3. Most Critical Scenario (Last one found is usually the most 'evolved' or latest)
     critical = crash_log[-1] 
+    crit_cfg = critical.get('cfg', {})
+    
     print(f"\n[Most Critical Scenario Configuration]")
-    print(f"  - Vehicles: {critical['cfg']['vehicles_count']}")
-    print(f"  - Spacing:  {critical['cfg']['initial_spacing']:.2f}")
-    print(f"  - Lane:     {critical['cfg']['initial_lane_id']}")
-    print(f"  - Duration: {critical['cfg']['duration']}")
+    print(f"  - Vehicles: {crit_cfg.get('vehicles_count', 'N/A')}")
+    print(f"  - Spacing:  {crit_cfg.get('initial_spacing', 'N/A')}")
+    print(f"  - Lane:     {crit_cfg.get('initial_lane_id', 'N/A')}")
+    print(f"  - Duration: {crit_cfg.get('duration', 'N/A')}")
+  
     
 
     print("="*60)
