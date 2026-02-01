@@ -325,21 +325,23 @@ def hill_climb(
                 best_res["best_seed_base"] = seed_base
                 best_res["history"].append(fit)
             
-            best_neighbor = min(iteration_candidates, key=lambda x: x["fit"])
+        best_neighbor = min(iteration_candidates, key=lambda x: x["fit"])
 
-            if best_neighbor['fit'] < cur_fit:
-                current_cfg = best_neighbor["cfg"]
-                cur_fit = best_neighbor["fit"]  
+        if best_neighbor['fit'] < cur_fit:
+            current_cfg = best_neighbor["cfg"]
+            cur_fit = best_neighbor["fit"]  
 
-                if cur_fit < best_res["best_fitness"]:
-                    best_res["best_cfg"] = copy.deepcopy(current_cfg)
-                    best_res["best_objectives"] = best_neighbor["objs"]
-                    best_res["best_fitness"] = cur_fit
-                    best_res["best_seed_base"] = best_neighbor["seed"]
+            if cur_fit < best_res["best_fitness"]:
+                best_res["best_cfg"] = copy.deepcopy(current_cfg)
+                best_res["best_objectives"] = best_neighbor["objs"]
+                best_res["best_fitness"] = cur_fit
+                best_res["best_seed_base"] = best_neighbor["seed"]
 
-            best_res["history"].append(best_res["best_fitness"])
-
-            pbar.set_postfix({"Best Fit": f"{best_res['best_fitness']:.4f}"})
+        best_res["history"].append(cur_fit)
+        pbar.set_postfix({
+            "Fit": f"{cur_fit:.4f}", 
+            "Crashes": f"{len(best_res['all_crashes'])}"
+        })
 
 
     return best_res
