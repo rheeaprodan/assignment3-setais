@@ -1,8 +1,8 @@
 from tqdm import trange
 import numpy as np
 import copy
+from typing import List, Dict, Any, Optional
 from envs.highway_env_utils import record_video_episode, run_episode
-
 
 class RandomSearch:
     def __init__(self, env_id, base_cfg, param_spec, policy, defaults):
@@ -32,6 +32,7 @@ class RandomSearch:
                     print(f"No Crash: scenario {i}, seed={s}")
                     # crash_log.append({"cfg": copy.deepcopy(cfg), "seed": s})
                     # record_video_episode(self.env_id, cfg, self.policy, self.defaults, s, out_dir="videos")
+
         return crash_log
 
     def sample_random_config(self, rng):

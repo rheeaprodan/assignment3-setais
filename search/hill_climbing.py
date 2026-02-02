@@ -26,10 +26,78 @@ No internal policy/model details beyond calling policy(obs, info).
 
 import copy
 from typing import Dict, Any, List, Tuple, Optional
-
+from tqdm import tqdm
 import numpy as np
 
-from envs.highway_env_utils import run_episode
+from envs.highway_env_utils import run_episode, record_video_episode
+
+from search.base_search import ScenarioSearch
+
+
+class HillClimbingSearch:
+    def __init__(self, env_id, base_cfg, param_spec, policy, defaults):
+        self.env_id = env_id
+        self.base_cfg = base_cfg
+        self.param_spec = param_spec
+        self.policy = policy
+        self.defaults = defaults
+
+    def run_search(self, n_scenarios=50, seed=42, iterations=None, neighbors_per_iter=10):
+        from search.hill_climbing import hill_climb
+        iters = iterations or n_scenarios
+        print(f"Running Hill Climbing (iters={iters}, neighbors={neighbors_per_iter})...")
+        
+        res = hill_climb(
+            self.env_id,
+            self.base_cfg,
+            self.param_spec,
+            self.policy,
+            self.defaults,
+            seed=seed,
+            iterations=iters,
+            neighbors_per_iter=neighbors_per_iter,
+        )
+
+        all_crashes = res.get("all_crashes", [])
+        best_dist = res["best_objectives"].get("min_distance", float("inf"))
+        
+        print("\n" + "="*40)
+        print(f"RESULTS: Hill Climbing")
+        print(f"Total Crashes Found: {len(all_crashes)}")
+        print(f"Best Fitness: {res['best_fitness']:.4f}")
+        print(f"Lowest Minimum Distance: {best_dist:.2f} m")
+        print("="*40 + "\n")
+        
+        processed_seeds = set()
+        final_crash_log = []
+
+        for crash in all_crashes:
+            s = crash["seed"]
+            if s in processed_seeds:
+                continue
+            
+            processed_seeds.add(s)
+            
+            # Add to final log
+            final_crash_log.append({"cfg": crash["cfg"], "seed": s})
+            
+            # Record video
+            print(f"Saving video for crash seed: {s}")
+            record_video_episode(
+                self.env_id, 
+                crash["cfg"], 
+                self.policy, 
+                self.defaults, 
+                s, 
+                out_dir="videos"
+            )
+
+        if not final_crash_log:
+             best_fit = res.get("best_fitness", float("inf"))
+             best_dist = res.get("best_objectives", {}).get("min_distance", "N/A")
+             print(f"No crashes found. Best fitness: {best_fit:.4f}, Min Dist: {best_dist}")
+
+        return final_crash_log
 
 
 # ============================================================
@@ -72,6 +140,9 @@ def compute_objectives_from_time_series(time_series: List[Dict[str, Any]]) -> Di
                 if distance < min_distance:
                     min_distance = distance
 
+    if min_distance == float('inf'):
+        min_distance = 1000.0
+
     return {"crash_count": crash_count, "min_distance": min_distance}
 
 
@@ -88,8 +159,10 @@ def compute_fitness(objectives: Dict[str, Any]) -> float:
 
     You can design a more refined scalarization if desired.
     """
-    fitness = -1.0 if objectives.get('crash_count', 0) > 0 else objectives.get('min_distance', float('inf'))
-    return fitness
+    if objectives.get('crash_count', 0) > 0:
+        return -1.0
+    
+    return float(objectives.get('min_distance', 1000.0))
 
 
 # ============================================================
@@ -129,6 +202,8 @@ def mutate_config(
         new_value = rng.integers(param_info['min'], param_info['max'] + 1)
     elif param_type =='float':
         new_value = rng.uniform(param_info['min'], param_info['max'])
+    else:
+        new_value = cfg_copy[param_to_mutate]
     
     cfg_copy[param_to_mutate] = new_value
 
@@ -185,68 +260,88 @@ def hill_climb(
     rng = np.random.default_rng(seed)
 
     # TODO (students): choose initialization (base_cfg or random scenario)
-    current_cfg = dict(base_cfg)
+    current_cfg = copy.deepcopy(base_cfg)
 
     # Evaluate initial solution (seed_base used for reproducibility)
     seed_base = int(rng.integers(1e9))
     crashed, ts = run_episode(env_id, current_cfg, policy, defaults, seed_base)
+    if crashed and len(ts) > 0:
+        print("Crash detected in hill climbing evaluation.")
+        ts[-1]["crashed"] = True
     obj = compute_objectives_from_time_series(ts)
     cur_fit = compute_fitness(obj)
 
-    best_cfg = copy.deepcopy(current_cfg)
-    best_obj = dict(obj)
-    best_fit = float(cur_fit)
-    best_seed_base = seed_base
+    best_res = {
+        "best_cfg": copy.deepcopy(current_cfg),
+        "best_objectives": obj,
+        "best_fitness": cur_fit,
+        "best_seed_base": seed_base,
+        "history": [cur_fit],
+        "all_crashes": []
+    }
+    
+    if cur_fit <= -1.0:
+        print("Initial configuration resulted in a crash!")
+        best_res["all_crashes"].append({
+            "cfg": copy.deepcopy(current_cfg),
+            "seed": seed_base,
+            "fitness": cur_fit
+        })
 
-    history = [best_fit]
+    history = [cur_fit]
+    pbar = tqdm(range(iterations), desc="Hill Climbing")    
 
-    # TODO (students): implement HC loop
-    # - generate neighbors
-    # - evaluate
-    # - pick best
-    # - accept if improved
-    # - early stop on crash (optional)
-
-    for i in range(iterations):
+    for _ in pbar:
+        iteration_candidates = []
+        found_crash_in_batch = False
         for j in range(neighbors_per_iter):
             neighbor_cfg = mutate_config(current_cfg, param_spec, rng)
             seed_base = int(rng.integers(1e9))
             crashed, ts = run_episode(env_id, neighbor_cfg, policy, defaults, seed_base)
+            if crashed and len(ts) > 0:
+                ts[-1]["crashed"] = True
             obj = compute_objectives_from_time_series(ts)
             fit = compute_fitness(obj)
 
-            if crashed:
-                best_cfg = copy.deepcopy(neighbor_cfg)
-                best_obj = dict(obj)
-                best_fit = float(fit)
-                best_seed_base = seed_base
-                history.append(best_fit)
-                stats = {
-                      "best_cfg": best_cfg,
-                      "best_objectives": best_obj,
-                      "best_fitness": best_fit,
-                      "best_seed_base": best_seed_base,
-                      "history": history
-                }
-                return stats
+            candidate = {
+                "cfg": neighbor_cfg,
+                "objs": obj,
+                "fit": fit,
+                "seed": seed_base
+            }
+            iteration_candidates.append(candidate)
 
-            if fit < cur_fit:
-                current_cfg = neighbor_cfg
-                cur_fit = fit
+            if fit <= -1.0:
+                print(f"Crash found! Fitness: {fit}")
+                best_res["all_crashes"].append({
+                    "cfg": copy.deepcopy(neighbor_cfg), 
+                    "seed": seed_base,
+                    "fitness": fit
+                })
+                # Update best result immediately
+                best_res["best_cfg"] = copy.deepcopy(neighbor_cfg)
+                best_res["best_objectives"] = obj
+                best_res["best_fitness"] = fit
+                best_res["best_seed_base"] = seed_base
+                best_res["history"].append(fit)
+            
+        best_neighbor = min(iteration_candidates, key=lambda x: x["fit"])
 
-                if fit < best_fit:
-                    best_cfg = copy.deepcopy(neighbor_cfg)
-                    best_obj = dict(obj)
-                    best_fit = float(fit)
-                    best_seed_base = seed_base
-                    history.append(best_fit)
+        if best_neighbor['fit'] < cur_fit:
+            current_cfg = best_neighbor["cfg"]
+            cur_fit = best_neighbor["fit"]  
+
+            if cur_fit < best_res["best_fitness"]:
+                best_res["best_cfg"] = copy.deepcopy(current_cfg)
+                best_res["best_objectives"] = best_neighbor["objs"]
+                best_res["best_fitness"] = cur_fit
+                best_res["best_seed_base"] = best_neighbor["seed"]
+
+        best_res["history"].append(cur_fit)
+        pbar.set_postfix({
+            "Fit": f"{cur_fit:.4f}", 
+            "Crashes": f"{len(best_res['all_crashes'])}"
+        })
 
 
-    stats = {
-          "best_cfg": best_cfg,
-          "best_objectives": best_obj,
-          "best_fitness": best_fit,
-          "best_seed_base": best_seed_base,
-          "history": history
-    }
-    return stats
+    return best_res
